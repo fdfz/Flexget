@@ -84,6 +84,28 @@ class ObjectsContainer:
         },
     }
 
+    health_object = {
+        'type': 'object',
+        'properties': {
+            'running': {'type': 'boolean'},
+            'config_valid': {'type': 'boolean'},
+            'errors': {
+                'type': 'array',
+                'items': {
+                    'type': 'object',
+                    'properties': {
+                        'error': {'type': 'string'},
+                        'config_path': {'type': 'string'},
+                    },
+                    'required': ['error', 'config_path'],
+                    'additionalProperties': False,
+                },
+            },
+        },
+        'required': ['running', 'config_valid', 'errors'],
+        'additionalProperties': False,
+    }
+
     dump_threads_object = {
         'type': 'object',
         'properties': {
@@ -130,6 +152,7 @@ config_validation_schema = api.schema_model(
 pid_schema = api.schema_model('server.pid', ObjectsContainer.pid_object)
 raw_config_schema = api.schema_model('raw_config', ObjectsContainer.raw_config_object)
 version_schema = api.schema_model('server.version', ObjectsContainer.version_object)
+health_schema = api.schema_model('server.health', ObjectsContainer.health_object)
 dump_threads_schema = api.schema_model('server.dump_threads', ObjectsContainer.dump_threads_object)
 server_manage_schema = api.schema_model('server.manage', ObjectsContainer.server_manage)
 crash_logs_schema = api.schema_model('server.crash_logs', ObjectsContainer.crash_logs)
@@ -275,6 +298,23 @@ class ServerVersionAPI(APIResource):
             'api_version': __api_version__,
             'latest_version': latest,
         })
+
+
+@server_api.route('/health/')
+class ServerHealthAPI(APIResource):
+    @api.response(200, description='Server health and config validation status', model=health_schema)
+    def get(self, session: Session = None) -> Response:
+        """Get daemon and current config validation status."""
+        response = {'running': True, 'config_valid': True, 'errors': []}
+        config = copy.deepcopy(getattr(self.manager, 'user_config', None) or self.manager.config or {})
+        try:
+            self.manager.validate_config(config)
+        except ConfigError as e:
+            response.update({
+                'config_valid': False,
+                'errors': [{'error': er.message, 'config_path': er.json_pointer} for er in e.errors],
+            })
+        return jsonify(response)
 
 
 @server_api.route('/dump_threads/', doc=False)
