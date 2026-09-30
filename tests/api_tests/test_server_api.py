@@ -8,6 +8,7 @@ import pytest
 from flexget import __version__
 from flexget.api.app import __version__ as __api_version__
 from flexget.api.app import base_message
+from flexget.config_schema import ConfigError
 from flexget.api.core.server import ObjectsContainer as OC
 from flexget.utils.tools import get_latest_flexget_version_number
 from tests.conftest import MockManager
@@ -92,6 +93,29 @@ class TestServerAPI:
             == 'dGFza3M6CiAgdGVzdDoKICAgIHJzczoKICAgICAgdXJsOiBodHRwOi8vdGVzdC9yc3MKICAgIG1'
             'vY2s6CiAgICAgIC0gdGl0bGU6IGVudHJ5IDEK'
         )
+
+    def test_health_valid_config(self, api_client, schema_match):
+        rsp = api_client.get('/server/health/')
+        assert rsp.status_code == 200
+        data = json.loads(rsp.get_data(as_text=True))
+
+        errors = schema_match(OC.health_object, data)
+        assert not errors
+        assert data == {'running': True, 'config_valid': True, 'errors': []}
+
+    def test_health_invalid_config(self, api_client, schema_match):
+        config_error = ConfigError('Did not pass schema validation.')
+        config_error.errors = [type('Err', (), {'message': 'invalid option', 'json_pointer': '/tasks'})()]
+        with patch.object(MockManager, 'validate_config', side_effect=config_error):
+            rsp = api_client.get('/server/health/')
+            assert rsp.status_code == 200
+            data = json.loads(rsp.get_data(as_text=True))
+
+        errors = schema_match(OC.health_object, data)
+        assert not errors
+        assert data['running'] is True
+        assert data['config_valid'] is False
+        assert data['errors'] == [{'error': 'invalid option', 'config_path': '/tasks'}]
 
     @pytest.mark.online
     def test_version(self, api_client, schema_match):
